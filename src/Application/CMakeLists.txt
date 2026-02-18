@@ -4,4 +4,4 @@ set(SRC application.h
 
 add_executable(application ${SRC})
 
-target_link_libraries(application PRIVATE glfw)
+target_link_libraries(application PRIVATE glfw DX12_Wrappers)

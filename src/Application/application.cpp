@@ -9,6 +9,8 @@
 
 FApplication::FApplication() : Width(1920), Height(1080)
 {
+    if (Width % 32 != 0)
+        throw std::invalid_argument("Width must be a multiple of 32");
     if (!glfwInit())
         throw std::runtime_error("GLFW initialization failed");
 

@@ -3,6 +3,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <vector>
 
 struct FDX12Context
 {
@@ -11,6 +12,7 @@ struct FDX12Context
 
     void Dispatch(uint32_t X, uint32_t Y, uint32_t Z);
     void Present();
+    std::vector<uint8_t> CompileShader(const wchar_t* FilePath, const wchar_t* EntryPoint, const wchar_t* Profile);
 
     void WaitIdle();
 
@@ -20,6 +22,7 @@ private:
     uint32_t Width = 0;
     uint32_t Height = 0;
     uint32_t CurrentFrameIndex = 0;
+    uint32_t CurrentBufferIndex = 0;
 
     Microsoft::WRL::ComPtr<IDXGIFactory6> DxgiFactory;
     Microsoft::WRL::ComPtr<ID3D12Device> Device;
@@ -32,6 +35,13 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> RootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> PSO;
     Microsoft::WRL::ComPtr<ID3D12Resource> OutputTexture;
+    Microsoft::WRL::ComPtr<ID3D12Resource> CellBuffers[2];
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> UAVHeap;
+    Microsoft::WRL::ComPtr<ID3DBlob> SigBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> ErrorBlob;
+    Microsoft::WRL::ComPtr<IDxcUtils> Utils;
+    Microsoft::WRL::ComPtr<IDxcCompiler3> Compiler;
+    Microsoft::WRL::ComPtr<IDxcIncludeHandler> IncludeHandler;
 
     UINT64 FenceValue = 0;
     HANDLE FenceEvent = nullptr;

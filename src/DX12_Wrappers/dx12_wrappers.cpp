@@ -14,7 +14,7 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     HRESULT HR = S_OK;
 
     /// Create Device
-    HR = CreateDXGIFactory(IID_PPV_ARGS(&DxgiFactory));
+    HR = CreateDXGIFactory2(0, IID_PPV_ARGS(&DxgiFactory));
 
     HR = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&Device));
 
@@ -53,6 +53,99 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
 
     HR = Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence));
     FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+
+    D3D12_DESCRIPTOR_HEAP_DESC HeapDescriptor = {};
+    HeapDescriptor.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    HeapDescriptor.NumDescriptors = 3;
+    HeapDescriptor.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    HR = Device->CreateDescriptorHeap(&HeapDescriptor, IID_PPV_ARGS(&UAVHeap));
+
+    if ((Width * Height) % 32 != 0)
+    {
+        throw std::runtime_error("Width * height must be a multiple of 32");
+    }
+
+    /// Allocate buffers
+    /// We pack 32 values into one uin32_t
+    uint32_t CellCount = Width * Height;
+    uint32_t SizeInBytes = CellCount / 8;
+    uint32_t SizeInUin32 = SizeInBytes / 32;
+    D3D12_HEAP_PROPERTIES HeapProperties = {};
+    HeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    D3D12_RESOURCE_DESC BufferDesc = {};
+    BufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    BufferDesc.Width = SizeInBytes;
+    BufferDesc.Height = 1;
+    BufferDesc.DepthOrArraySize = 1;
+    BufferDesc.MipLevels = 1;
+    BufferDesc.SampleDesc.Count = 1;
+    BufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    BufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    for (auto & CellBuffer : CellBuffers)
+    {
+        HR = Device->CreateCommittedResource(&HeapProperties, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&CellBuffer));
+    }
+
+    /// Create the output texture
+    D3D12_RESOURCE_DESC TextureDesc = {};
+    TextureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    TextureDesc.Width = Width;
+    TextureDesc.Height = Height;
+    TextureDesc.DepthOrArraySize = 1;
+    TextureDesc.MipLevels = 1;
+    TextureDesc.SampleDesc.Count = 1;
+    TextureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    TextureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    HR = Device->CreateCommittedResource(&HeapProperties, D3D12_HEAP_FLAG_NONE, &TextureDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&OutputTexture));
+
+    /// Creeate UAV descriptors
+    UINT DescSize = Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE Handle = UAVHeap->GetCPUDescriptorHandleForHeapStart();
+
+    for (int i = 0; i < 2; i++)
+    {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
+        UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        UAVDesc.Format = DXGI_FORMAT_UNKNOWN;
+        UAVDesc.Buffer.NumElements = SizeInUin32;
+        UAVDesc.Buffer.StructureByteStride = sizeof(uint32_t);
+        Device->CreateUnorderedAccessView(CellBuffers[i].Get(), nullptr, &UAVDesc, Handle);
+        Handle.ptr += DescSize;
+    }
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
+    UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    UAVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    Device->CreateUnorderedAccessView(OutputTexture.Get(), nullptr, &UAVDesc, Handle);
+
+    /// Create the root signature
+    D3D12_DESCRIPTOR_RANGE Ranges[1] = {};
+    Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    Ranges[0].NumDescriptors = 3;
+    Ranges[0].BaseShaderRegister = 0;
+
+    D3D12_ROOT_PARAMETER RootParameter = {};
+    RootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    RootParameter.DescriptorTable.NumDescriptorRanges = 1;
+    RootParameter.DescriptorTable.pDescriptorRanges = Ranges;
+    RootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC RootSignatureDesc = {};
+    RootSignatureDesc.NumParameters = 1;
+    RootSignatureDesc.pParameters = &RootParameter;
+    RootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    HR = D3D12SerializeRootSignature(&RootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &SigBlob, &ErrorBlob);
+    HR = Device->CreateRootSignature(0, SigBlob->GetBufferPointer(), SigBlob->GetBufferSize(), IID_PPV_ARGS(&RootSignature));
+
+    /// Prepare compiler
+    HR = DxcCreateInstance((CLSID_DxcUtils), IID_PPV_ARGS(&Utils));
+    HR = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&Compiler));
+
+    HR = Utils->CreateDefaultIncludeHandler(&IncludeHandler);
 
     return SUCCEEDED(HR);
 }
@@ -112,6 +205,46 @@ void FDX12Context::Present()
     }
 
     CurrentFrameIndex = SwapChain3->GetCurrentBackBufferIndex();
+}
+
+std::vector<uint8_t> FDX12Context::CompileShader(const wchar_t* FilePath, const wchar_t* EntryPoint, const wchar_t* Profile)
+{
+    HRESULT HR = S_OK;
+
+    ComPtr<IDxcBlobEncoding> SourceBlob;
+    HR = Utils->LoadFile(FilePath, nullptr, &SourceBlob);
+
+    DxcBuffer Source = {};
+    Source.Ptr = SourceBlob->GetBufferPointer();
+    Source.Size = SourceBlob->GetBufferSize();
+    Source.Encoding = DXC_CP_ACP;
+
+    LPCWSTR Args[] ={
+        FilePath,
+        L"-E", EntryPoint,
+        L"-T", Profile,
+        L"-Zs"
+    };
+
+    ComPtr<IDxcResult> Result;
+    HR = Compiler->Compile(&Source, Args, _countof(Args), IncludeHandler.Get(), IID_PPV_ARGS(&Result));
+
+    ComPtr<IDxcBlobUtf8> Errors;
+    HR = Result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&Errors), nullptr);
+    if (Errors && Errors->GetStringLength() > 0)
+    {
+        OutputDebugStringA(Errors->GetStringPointer());
+    }
+
+    Result->GetStatus(&HR);
+    if (FAILED(HR))
+        return {};
+
+    ComPtr<IDxcBlob> ShaderBlob;
+    HR = Result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&ShaderBlob), nullptr);
+
+    auto* Begin = reinterpret_cast<uint8_t*>(ShaderBlob->GetBufferPointer());
+    return {Begin, Begin + ShaderBlob->GetBufferSize()};
 }
 
 void FDX12Context::WaitIdle()

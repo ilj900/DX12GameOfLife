@@ -13,6 +13,9 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
 {
     HRESULT HR = S_OK;
 
+    this->Width = Width;
+    this->Height = Height;
+
     /// Create Device
     HR = CreateDXGIFactory2(0, IID_PPV_ARGS(&DxgiFactory));
 
@@ -69,7 +72,7 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     /// We pack 32 values into one uin32_t
     uint32_t CellCount = Width * Height;
     uint32_t SizeInBytes = CellCount / 8;
-    uint32_t SizeInUin32 = SizeInBytes / 32;
+    uint32_t SizeInUin32 = CellCount / 32;
     D3D12_HEAP_PROPERTIES HeapProperties = {};
     HeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
 
@@ -127,15 +130,20 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     Ranges[0].NumDescriptors = 3;
     Ranges[0].BaseShaderRegister = 0;
 
-    D3D12_ROOT_PARAMETER RootParameter = {};
-    RootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    RootParameter.DescriptorTable.NumDescriptorRanges = 1;
-    RootParameter.DescriptorTable.pDescriptorRanges = Ranges;
-    RootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_ROOT_PARAMETER RootParameters[2] = {};
+    RootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    RootParameters[0].DescriptorTable.NumDescriptorRanges = 1;
+    RootParameters[0].DescriptorTable.pDescriptorRanges = Ranges;
+    RootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    RootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    RootParameters[1].Constants.Num32BitValues = 1;
+    RootParameters[1].Constants.ShaderRegister = 0;
+    RootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC RootSignatureDesc = {};
-    RootSignatureDesc.NumParameters = 1;
-    RootSignatureDesc.pParameters = &RootParameter;
+    RootSignatureDesc.NumParameters = 2;
+    RootSignatureDesc.pParameters = RootParameters;
     RootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
     HR = D3D12SerializeRootSignature(&RootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &SigBlob, &ErrorBlob);
@@ -146,6 +154,14 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     HR = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&Compiler));
 
     HR = Utils->CreateDefaultIncludeHandler(&IncludeHandler);
+
+    /// Compile shader
+    auto ShaderBytecode = CompileShader(L"tick.hlsl", L"main", L"cs_6_0");
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc = {};
+    PSODesc.pRootSignature = RootSignature.Get();
+    PSODesc.CS = {ShaderBytecode.data(), ShaderBytecode.size()};
+    HR = Device->CreateComputePipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
 
     return SUCCEEDED(HR);
 }
@@ -167,26 +183,39 @@ void FDX12Context::Dispatch(uint32_t X, uint32_t Y, uint32_t Z)
 
     CommandList->SetComputeRootSignature(RootSignature.Get());
 
-    CommandList->SetComputeRootUnorderedAccessView(0, OutputTexture->GetGPUVirtualAddress());
+    ID3D12DescriptorHeap* Heaps[] = {UAVHeap.Get()};
+    CommandList->SetDescriptorHeaps(1, Heaps);
+    CommandList->SetComputeRootDescriptorTable(0, UAVHeap->GetGPUDescriptorHandleForHeapStart());
+    CommandList->SetComputeRoot32BitConstant(1, CurrentBufferIndex, 0);
 
     CommandList->Dispatch(X, Y, Z);
 
-    D3D12_RESOURCE_BARRIER Barrier = {};
-    Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    Barrier.Transition.pResource = BackBuffers[CurrentFrameIndex].Get();
-    Barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-    Barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-    Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    D3D12_RESOURCE_BARRIER Barriers[2] = {};
+    Barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    Barriers[0].Transition.pResource = OutputTexture.Get();
+    Barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    Barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    Barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 
-    CommandList->ResourceBarrier(1, &Barrier);
+    Barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    Barriers[1].Transition.pResource = BackBuffers[CurrentFrameIndex].Get();
+    Barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    Barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+    Barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+    CommandList->ResourceBarrier(2, Barriers);
 
     CommandList->CopyResource(BackBuffers[CurrentFrameIndex].Get(), OutputTexture.Get());
-    std::swap(Barrier.Transition.StateBefore, Barrier.Transition.StateAfter);
-    CommandList->ResourceBarrier(1, &Barrier);
+
+    std::swap(Barriers[0].Transition.StateBefore, Barriers[0].Transition.StateAfter);
+    std::swap(Barriers[1].Transition.StateBefore, Barriers[1].Transition.StateAfter);
+    CommandList->ResourceBarrier(2, Barriers);
 
     HR = CommandList->Close();
     ID3D12CommandList* Lists[] = {CommandList.Get()};
     CommandQueue->ExecuteCommandLists(1, Lists);
+
+    CurrentBufferIndex = 1 - CurrentBufferIndex;
 }
 
 void FDX12Context::Present()
@@ -222,8 +251,7 @@ std::vector<uint8_t> FDX12Context::CompileShader(const wchar_t* FilePath, const 
     LPCWSTR Args[] ={
         FilePath,
         L"-E", EntryPoint,
-        L"-T", Profile,
-        L"-Zs"
+        L"-T", Profile
     };
 
     ComPtr<IDxcResult> Result;

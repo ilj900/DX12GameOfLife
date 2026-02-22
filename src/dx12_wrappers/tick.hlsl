@@ -8,7 +8,7 @@ RWTexture2D<float4> OutputTexture   : register(u0);
 cbuffer Constants : register(b0)
 {
     uint Width;
-    uint Height
+    uint Height;
     uint PingPong; // 0 = Read A warite  B, 1 = read B write A
 }
 
@@ -44,7 +44,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex)
     uint ux = DTid.x;
     uint uy = DTid.y;
 
-    if (ux >= UintsPerRow || uy > Height)
+    if (ux >= UintsPerRow || uy >= Height)
         return;
 
     for (uint bit = 0; bit < 32; ++bit)
@@ -59,10 +59,11 @@ void main(uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex)
             for (int j = -1; j <= 1; ++j)
             {
                 if (i == 0 && j == 0) continue;
-                if (PingPong)
-                    Neighbours = GetCell(BufferA, (int)CellX + i, int(CellY) + j, UintsPerRow);
+
+                if (PingPong == 0)
+                    Neighbours += GetCell(BufferA, (int)CellX + i, int(CellY) + j, UintsPerRow);
                 else
-                    Neighbours = GetCell(BufferB, (int)CellX + i, int(CellY) + j, UintsPerRow);
+                    Neighbours += GetCell(BufferB, (int)CellX + i, int(CellY) + j, UintsPerRow);
             }
         }
 
@@ -78,7 +79,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex)
         else
             NextAlive = (Neighbours == 3) ? 1 : 0;
 
-        if (PingPong)
+        if (PingPong == 0)
             SetCell(BufferB, (int)CellX, (int)CellY, UintsPerRow, NextAlive);
         else
             SetCell(BufferA, (int)CellX, (int)CellY, UintsPerRow, NextAlive);

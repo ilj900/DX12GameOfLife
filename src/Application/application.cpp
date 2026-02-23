@@ -6,6 +6,7 @@
 #include "application.h"
 
 #include <stdexcept>
+#include <string>
 
 FApplication::FApplication() : Width(1920), Height(1080)
 {
@@ -29,10 +30,13 @@ FApplication::~FApplication()
 
 int FApplication::Run()
 {
+    static int i = 0;
+
     while (!glfwWindowShouldClose(Window))
     {
         DX12Context.Dispatch(Width / 8, Height / 8, 1);
         DX12Context.Present();
+        glfwSetWindowTitle(Window, std::to_string(i++).c_str());
         glfwPollEvents();
     }
 

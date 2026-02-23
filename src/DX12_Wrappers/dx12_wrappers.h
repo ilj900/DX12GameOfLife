@@ -1,6 +1,7 @@
 #pragma once
 
 #include <d3d12.h>
+#include <d3d12sdklayers.h>
 #include <dxgi1_6.h>
 #include <dxcapi.h>
 #include <wrl.h>
@@ -29,6 +30,7 @@ private:
 
     Microsoft::WRL::ComPtr<IDXGIFactory6> DxgiFactory;
     Microsoft::WRL::ComPtr<ID3D12Device> Device;
+    Microsoft::WRL::ComPtr<ID3D12Debug> DebugController;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> CommandQueue;
     Microsoft::WRL::ComPtr<IDXGISwapChain3> SwapChain3;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> CommandAllocator;
@@ -48,4 +50,6 @@ private:
 
     UINT64 FenceValue = 0;
     HANDLE FenceEvent = nullptr;
+
+    bool bDebug = true;
 };

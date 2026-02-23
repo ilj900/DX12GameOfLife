@@ -5,6 +5,32 @@
 
 using Microsoft::WRL::ComPtr;
 
+#define CHECK_RESULT() CHECH(HR)
+
+void CHECH(HRESULT HR)
+{
+    if (HR == S_OK) return;
+
+    char* Msg = nullptr;
+
+    FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER |
+        FORMAT_MESSAGE_FROM_SYSTEM |
+        FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        HR,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL),
+        (LPSTR)&Msg,
+        0,
+        nullptr);
+
+    if (Msg)
+    {
+        OutputDebugStringA(Msg);
+        LocalFree(Msg);
+    }
+}
+
 bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height)
 {
     HRESULT HR = S_OK;
@@ -12,16 +38,25 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     this->Width = Width;
     this->Height = Height;
 
-    /// Create Device
-    HR = CreateDXGIFactory2(0, IID_PPV_ARGS(&DxgiFactory));
+    /// Enable debug
+    if (bDebug && SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&DebugController))))
+    {
+        DebugController->EnableDebugLayer();
+    }
 
-    HR = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&Device));
+    /// Create Device
+
+    UINT Flags = 0;
+    if (bDebug) Flags |= DXGI_CREATE_FACTORY_DEBUG;
+    HR = CreateDXGIFactory2(Flags, IID_PPV_ARGS(&DxgiFactory)); CHECK_RESULT();
+
+    HR = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&Device)); CHECK_RESULT();
 
     /// Create Command Queue
     D3D12_COMMAND_QUEUE_DESC Desc = {};
     Desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
-    HR = Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&CommandQueue));
+    HR = Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&CommandQueue)); CHECK_RESULT();
 
     /// Create Swapchain
     DXGI_SWAP_CHAIN_DESC1 SwapChainDesc = {};
@@ -34,30 +69,30 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     SwapChainDesc.SampleDesc.Count = 1;
 
     ComPtr<IDXGISwapChain1> SwapChain1;
-    HR = DxgiFactory->CreateSwapChainForHwnd(CommandQueue.Get(), static_cast<HWND>(Win32Handle), &SwapChainDesc, nullptr, nullptr, &SwapChain1);
+    HR = DxgiFactory->CreateSwapChainForHwnd(CommandQueue.Get(), static_cast<HWND>(Win32Handle), &SwapChainDesc, nullptr, nullptr, &SwapChain1); CHECK_RESULT();
 
-    HR = SwapChain1.As(&SwapChain3);
+    HR = SwapChain1.As(&SwapChain3); CHECK_RESULT();
     CurrentFrameIndex = SwapChain3->GetCurrentBackBufferIndex();
 
     for (int i = 0; i < FrameCount; i++)
     {
-        HR = SwapChain3->GetBuffer(i, IID_PPV_ARGS(&BackBuffers[i]));
+        HR = SwapChain3->GetBuffer(i, IID_PPV_ARGS(&BackBuffers[i])); CHECK_RESULT();
     }
 
     /// Create Command Allocator and Command List
-    HR = Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator));
+    HR = Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator)); CHECK_RESULT();
 
-    HR = Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&CommandList));
-    HR = CommandList->Close();
+    HR = Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&CommandList)); CHECK_RESULT();
+    HR = CommandList->Close(); CHECK_RESULT();
 
-    HR = Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence));
+    HR = Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)); CHECK_RESULT();
     FenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
     D3D12_DESCRIPTOR_HEAP_DESC HeapDescriptor = {};
     HeapDescriptor.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     HeapDescriptor.NumDescriptors = 3;
     HeapDescriptor.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    HR = Device->CreateDescriptorHeap(&HeapDescriptor, IID_PPV_ARGS(&UAVHeap));
+    HR = Device->CreateDescriptorHeap(&HeapDescriptor, IID_PPV_ARGS(&UAVHeap)); CHECK_RESULT();
 
     if ((Width * Height) % 32 != 0)
     {
@@ -84,7 +119,7 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
 
     for (auto & CellBuffer : CellBuffers)
     {
-        HR = Device->CreateCommittedResource(&HeapProperties, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&CellBuffer));
+        HR = Device->CreateCommittedResource(&HeapProperties, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&CellBuffer)); CHECK_RESULT();
     }
 
     /// Fill the initial buffer
@@ -107,18 +142,18 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     D3D12_HEAP_PROPERTIES UploadProps = {};
     UploadProps.Type = D3D12_HEAP_TYPE_UPLOAD;
     ComPtr<ID3D12Resource> UploadBuffer;
-    HR = Device->CreateCommittedResource(&UploadProps, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadBuffer));
+    HR = Device->CreateCommittedResource(&UploadProps, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadBuffer)); CHECK_RESULT();
 
     void* MappedData = nullptr;
     D3D12_RANGE ReadRange = {0, 0};
-    HR = UploadBuffer->Map(0, &ReadRange, &MappedData);
+    HR = UploadBuffer->Map(0, &ReadRange, &MappedData); CHECK_RESULT();
     std::memcpy(MappedData, InitialState.data(), SizeInBytes);
     UploadBuffer->Unmap(0, nullptr);
 
-    HR = CommandAllocator->Reset();
-    HR = CommandList->Reset(CommandAllocator.Get(), nullptr);
+    HR = CommandAllocator->Reset(); CHECK_RESULT();
+    HR = CommandList->Reset(CommandAllocator.Get(), nullptr); CHECK_RESULT();
     CommandList->CopyResource(CellBuffers[0].Get(), UploadBuffer.Get());
-    HR = CommandList->Close();
+    HR = CommandList->Close(); CHECK_RESULT();
 
     ID3D12CommandList* CommandLists[] = { CommandList.Get() };
     CommandQueue->ExecuteCommandLists(1, CommandLists);
@@ -135,7 +170,7 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     TextureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     TextureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-    HR = Device->CreateCommittedResource(&HeapProperties, D3D12_HEAP_FLAG_NONE, &TextureDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&OutputTexture));
+    HR = Device->CreateCommittedResource(&HeapProperties, D3D12_HEAP_FLAG_NONE, &TextureDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&OutputTexture)); CHECK_RESULT();
 
     /// Creeate UAV descriptors
     UINT DescSize = Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -179,14 +214,14 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     RootSignatureDesc.pParameters = RootParameters;
     RootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-    HR = D3D12SerializeRootSignature(&RootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &SigBlob, &ErrorBlob);
-    HR = Device->CreateRootSignature(0, SigBlob->GetBufferPointer(), SigBlob->GetBufferSize(), IID_PPV_ARGS(&RootSignature));
+    HR = D3D12SerializeRootSignature(&RootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &SigBlob, &ErrorBlob); CHECK_RESULT();
+    HR = Device->CreateRootSignature(0, SigBlob->GetBufferPointer(), SigBlob->GetBufferSize(), IID_PPV_ARGS(&RootSignature)); CHECK_RESULT();
 
     /// Prepare compiler
-    HR = DxcCreateInstance((CLSID_DxcUtils), IID_PPV_ARGS(&Utils));
-    HR = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&Compiler));
+    HR = DxcCreateInstance((CLSID_DxcUtils), IID_PPV_ARGS(&Utils)); CHECK_RESULT();
+    HR = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&Compiler)); CHECK_RESULT();
 
-    HR = Utils->CreateDefaultIncludeHandler(&IncludeHandler);
+    HR = Utils->CreateDefaultIncludeHandler(&IncludeHandler); CHECK_RESULT();
 
     /// Compile shader
     auto ShaderBytecode = CompileShader(L"tick.hlsl", L"main", L"cs_6_0");
@@ -194,7 +229,7 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc = {};
     PSODesc.pRootSignature = RootSignature.Get();
     PSODesc.CS = {ShaderBytecode.data(), ShaderBytecode.size()};
-    HR = Device->CreateComputePipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
+    HR = Device->CreateComputePipelineState(&PSODesc, IID_PPV_ARGS(&PSO)); CHECK_RESULT();
 
     return SUCCEEDED(HR);
 }

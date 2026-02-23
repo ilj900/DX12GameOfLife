@@ -142,7 +142,11 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     D3D12_HEAP_PROPERTIES UploadProps = {};
     UploadProps.Type = D3D12_HEAP_TYPE_UPLOAD;
     ComPtr<ID3D12Resource> UploadBuffer;
-    HR = Device->CreateCommittedResource(&UploadProps, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadBuffer)); CHECK_RESULT();
+    {
+        D3D12_RESOURCE_DESC BufferDescCopy = BufferDesc;
+        BufferDescCopy.Flags = D3D12_RESOURCE_FLAG_NONE;
+        HR = Device->CreateCommittedResource(&UploadProps, D3D12_HEAP_FLAG_NONE, &BufferDescCopy, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadBuffer)); CHECK_RESULT();
+    }
 
     void* MappedData = nullptr;
     D3D12_RANGE ReadRange = {0, 0};

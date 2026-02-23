@@ -3,7 +3,7 @@
 
 RWStructuredBuffer<uint> BufferA     : register(u0);
 RWStructuredBuffer<uint> BufferB     : register(u1);
-RWTexture2D<float4> OutputTexture   : register(u0);
+RWTexture2D<float4> OutputTexture   : register(u2);
 
 cbuffer Constants : register(b0)
 {
@@ -84,6 +84,6 @@ void main(uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex)
         else
             SetCell(BufferA, (int)CellX, (int)CellY, UintsPerRow, NextAlive);
 
-        OutputTexture[uint2(CellX, CellY)] = NextAlive ? float(1, 1, 1, 1) : float(0, 0, 0, 1);
+        OutputTexture[uint2(CellX, CellY)] = NextAlive ? float4(1, 1, 1, 1) : float4(0, 0, 0, 1);
     }
 }

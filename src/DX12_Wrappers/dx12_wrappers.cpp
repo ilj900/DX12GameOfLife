@@ -228,7 +228,7 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     HR = Utils->CreateDefaultIncludeHandler(&IncludeHandler); CHECK_RESULT();
 
     /// Compile shader
-    auto ShaderBytecode = CompileShader(L"tick.hlsl", L"main", L"cs_6_0");
+    auto ShaderBytecode = CompileShader(L"../src/dx12_wrappers/tick.hlsl", L"main", L"cs_6_0");
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc = {};
     PSODesc.pRootSignature = RootSignature.Get();
@@ -313,7 +313,7 @@ std::vector<uint8_t> FDX12Context::CompileShader(const wchar_t* FilePath, const 
     HRESULT HR = S_OK;
 
     ComPtr<IDxcBlobEncoding> SourceBlob;
-    HR = Utils->LoadFile(FilePath, nullptr, &SourceBlob);
+    HR = Utils->LoadFile(FilePath, nullptr, &SourceBlob);  CHECK_RESULT();
 
     DxcBuffer Source = {};
     Source.Ptr = SourceBlob->GetBufferPointer();
@@ -327,12 +327,13 @@ std::vector<uint8_t> FDX12Context::CompileShader(const wchar_t* FilePath, const 
     };
 
     ComPtr<IDxcResult> Result;
-    HR = Compiler->Compile(&Source, Args, _countof(Args), IncludeHandler.Get(), IID_PPV_ARGS(&Result));
+    HR = Compiler->Compile(&Source, Args, _countof(Args), IncludeHandler.Get(), IID_PPV_ARGS(&Result));  CHECK_RESULT();
 
     ComPtr<IDxcBlobUtf8> Errors;
-    HR = Result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&Errors), nullptr);
+    HR = Result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&Errors), nullptr);  CHECK_RESULT();
     if (Errors && Errors->GetStringLength() > 0)
     {
+        std::string What = Errors->GetStringPointer();
         OutputDebugStringA(Errors->GetStringPointer());
     }
 
@@ -341,7 +342,7 @@ std::vector<uint8_t> FDX12Context::CompileShader(const wchar_t* FilePath, const 
         return {};
 
     ComPtr<IDxcBlob> ShaderBlob;
-    HR = Result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&ShaderBlob), nullptr);
+    HR = Result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&ShaderBlob), nullptr);  CHECK_RESULT();
 
     auto* Begin = reinterpret_cast<uint8_t*>(ShaderBlob->GetBufferPointer());
     return {Begin, Begin + ShaderBlob->GetBufferSize()};

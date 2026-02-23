@@ -1,11 +1,7 @@
-#include <d3d12.h>
-#include <dxgi1_6.h>
-#include <dxcapi.h>
-#include <wrl.h>
-
 #include "dx12_wrappers.h"
 
 #include <future>
+#include <random>
 
 using Microsoft::WRL::ComPtr;
 
@@ -90,6 +86,43 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     {
         HR = Device->CreateCommittedResource(&HeapProperties, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&CellBuffer));
     }
+
+    /// Fill the initial buffer
+    std::vector<uint32_t> InitialState(SizeInUin32);
+    std::mt19937 Generator(0);
+    std::bernoulli_distribution AliveDistribution(0.2);
+    for (uint32_t& PackedCells : InitialState)
+    {
+        PackedCells = 0;
+        for (uint32_t Bit = 0; Bit < 32; Bit++)
+        {
+            if (AliveDistribution(Generator))
+            {
+                PackedCells |= (1u << Bit);
+            }
+        }
+    }
+
+    /// Upload data
+    D3D12_HEAP_PROPERTIES UploadProps = {};
+    UploadProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+    ComPtr<ID3D12Resource> UploadBuffer;
+    HR = Device->CreateCommittedResource(&UploadProps, D3D12_HEAP_FLAG_NONE, &BufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&UploadBuffer));
+
+    void* MappedData = nullptr;
+    D3D12_RANGE ReadRange = {0, 0};
+    HR = UploadBuffer->Map(0, &ReadRange, &MappedData);
+    std::memcpy(MappedData, InitialState.data(), SizeInBytes);
+    UploadBuffer->Unmap(0, nullptr);
+
+    HR = CommandAllocator->Reset();
+    HR = CommandList->Reset(CommandAllocator.Get(), nullptr);
+    CommandList->CopyResource(CellBuffers[0].Get(), UploadBuffer.Get());
+    HR = CommandList->Close();
+
+    ID3D12CommandList* CommandLists[] = { CommandList.Get() };
+    CommandQueue->ExecuteCommandLists(1, CommandLists);
+    WaitIdle();
 
     /// Create the output texture
     D3D12_RESOURCE_DESC TextureDesc = {};

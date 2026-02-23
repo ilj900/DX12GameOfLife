@@ -1,6 +1,9 @@
 #pragma once
 
-#include <wrl/client.h>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <dxcapi.h>
+#include <wrl.h>
 
 #include <cstdint>
 #include <vector>

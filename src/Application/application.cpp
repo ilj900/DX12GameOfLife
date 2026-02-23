@@ -34,7 +34,7 @@ int FApplication::Run()
 
     while (!glfwWindowShouldClose(Window))
     {
-        DX12Context.Dispatch(Width / 8, Height / 8, 1);
+        DX12Context.Dispatch(Width / 8, Height, 1);
         DX12Context.Present();
         glfwSetWindowTitle(Window, std::to_string(i++).c_str());
         glfwPollEvents();

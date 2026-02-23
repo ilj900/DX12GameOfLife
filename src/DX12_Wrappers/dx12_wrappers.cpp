@@ -209,7 +209,7 @@ bool FDX12Context::Initialize(void* Win32Handle, uint32_t Width, uint32_t Height
     RootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     RootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    RootParameters[1].Constants.Num32BitValues = 1;
+    RootParameters[1].Constants.Num32BitValues = 3;
     RootParameters[1].Constants.ShaderRegister = 0;
     RootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
@@ -250,15 +250,22 @@ void FDX12Context::Dispatch(uint32_t X, uint32_t Y, uint32_t Z)
 {
     HRESULT HR = S_OK;
 
-    HR = CommandAllocator->Reset();
-    HR = CommandList->Reset(CommandAllocator.Get(), PSO.Get());
+    HR = CommandAllocator->Reset(); CHECK_RESULT();
+    HR = CommandList->Reset(CommandAllocator.Get(), PSO.Get()); CHECK_RESULT();
 
     CommandList->SetComputeRootSignature(RootSignature.Get());
 
     ID3D12DescriptorHeap* Heaps[] = {UAVHeap.Get()};
     CommandList->SetDescriptorHeaps(1, Heaps);
     CommandList->SetComputeRootDescriptorTable(0, UAVHeap->GetGPUDescriptorHandleForHeapStart());
-    CommandList->SetComputeRoot32BitConstant(1, CurrentBufferIndex, 0);
+    struct FConstants
+    {
+        uint32_t W;
+        uint32_t H;
+        uint32_t I;
+    };
+    FConstants Constants = {Width, Height, CurrentBufferIndex};
+    CommandList->SetComputeRoot32BitConstants(0, sizeof(FConstants) / 4, &Constants, 0);
 
     CommandList->Dispatch(X, Y, Z);
 
@@ -283,7 +290,7 @@ void FDX12Context::Dispatch(uint32_t X, uint32_t Y, uint32_t Z)
     std::swap(Barriers[1].Transition.StateBefore, Barriers[1].Transition.StateAfter);
     CommandList->ResourceBarrier(2, Barriers);
 
-    HR = CommandList->Close();
+    HR = CommandList->Close(); CHECK_RESULT();
     ID3D12CommandList* Lists[] = {CommandList.Get()};
     CommandQueue->ExecuteCommandLists(1, Lists);
 

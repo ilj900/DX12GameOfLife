@@ -265,7 +265,7 @@ void FDX12Context::Dispatch(uint32_t X, uint32_t Y, uint32_t Z)
         uint32_t I;
     };
     FConstants Constants = {Width, Height, CurrentBufferIndex};
-    CommandList->SetComputeRoot32BitConstants(0, sizeof(FConstants) / 4, &Constants, 0);
+    CommandList->SetComputeRoot32BitConstants(1, sizeof(FConstants) / 4, &Constants, 0);
 
     CommandList->Dispatch(X, Y, Z);
 
